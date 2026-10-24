@@ -1,0 +1,47 @@
+name: Fox 5672 Linux verification
+on:
+  push:
+    branches: [codex/verify-5672-fox-20261024]
+permissions:
+  contents: read
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22.23.4, 24.22.1, 26.12.1]
+    env:
+      HUSKY: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm install -g npm@11.16.0
+      - run: npm ci
+      - run: npm run build:cached
+      - name: Existing source ownership and firmware regressions
+        run: >-
+          npm run test:focused --
+          src/artifacts/ArtifactResourceScope.test.ts
+          tests/boundary/filesystem/artifactExtractionSourceCleanup.test.ts
+          tests/boundary/filesystem/artifactSourceOwners.test.ts
+          tests/boundary/filesystem/firmwareSourceCleanup.test.ts
+          tests/boundary/filesystem/safeOutputTree.test.ts
+          tests/boundary/filesystem/safeOutputTreeLifecycle.test.ts
+          tests/boundary/filesystem/safeOutputTreeSourceFailures.test.ts
+          tests/boundary/filesystem/sourceFailureSemantics.test.ts
+          tests/boundary/filesystem/publicationReadCancellation.test.ts
+          tests/boundary/firmware/firmwareReportFiles.test.ts
+          tests/boundary/firmware/firmwareIntegration.test.ts
+      - name: Original CLI crash loop and delayed pending reads
+        if: ${{ !cancelled() }}
+        run: python3 scripts/verify-fox-5672.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ always() }}
+        with:
+          name: fox-5672-node-${{ matrix.node }}
+          path: fox-verification-results/
+          retention-days: 7
