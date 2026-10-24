@@ -1,0 +1,37 @@
+name: Firmware fixture same-host repeated comparison
+on:
+  push:
+    branches: [codex/verify-firmware-paired-20261024]
+permissions:
+  contents: read
+jobs:
+  paired:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ATTEMPTS: "20"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: harness
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 238914974d17729bcdcc2e6cb012745d70d98a5e
+          path: baseline
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 15c9c975f04b7ebe55ea8caf4b8214fd017b21c5
+          path: candidate
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 26.12.1
+      - name: Unchanged baseline 20 attempts
+        working-directory: baseline
+        run: python3 ../harness/scripts/verify-firmware-fixture.py
+        env:
+          EXPECT_SUCCESS: "0"
+      - name: Candidate 20 attempts with independent digest verification
+        working-directory: candidate
+        run: python3 ../harness/scripts/verify-firmware-fixture.py
+        env:
+          EXPECT_SUCCESS: "1"

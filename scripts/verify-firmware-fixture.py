@@ -17,7 +17,7 @@ if not node_version.startswith('v22.'):
 observations = []
 with tempfile.TemporaryDirectory(prefix='firmware-fixture-', dir=os.environ['RUNNER_TEMP']) as temporary:
     root = Path(temporary)
-    for attempt in range(3):
+    for attempt in range(int(os.environ.get('ATTEMPTS', '3'))):
         run = root / str(attempt)
         run.mkdir()
         source = run / 'input.bin'
