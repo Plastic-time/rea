@@ -1,0 +1,44 @@
+name: Fox 5672 oversized fixture baseline
+on:
+  push:
+    branches: [codex/verify-5672-baseline-20261024]
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22.23.4, 26.12.1]
+        revision:
+          [
+            7349ea854dbd5d883b5dc0486e65abd4bf6c6998,
+            149b43ee6158862c94044fd24432dca790d54665,
+          ]
+    env:
+      HUSKY: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: harness
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ matrix.revision }}
+          path: target
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm install -g npm@11.16.0
+      - run: npm ci
+        working-directory: target
+      - name: Original unmodified integration tests
+        run: npm run test:focused -- tests/boundary/firmware/firmwareIntegration.test.ts
+        working-directory: target
+      - name: Capture exact producer error in an added diagnostic test
+        if: ${{ !cancelled() }}
+        run: |
+          cp ../harness/scripts/foxOversizedDiagnostic.test.ts tests/boundary/firmware/foxOversizedDiagnostic.test.ts
+          npm run test:focused -- tests/boundary/firmware/foxOversizedDiagnostic.test.ts
+        working-directory: target
