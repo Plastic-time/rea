@@ -15,7 +15,7 @@ jobs:
         revision:
           [
             238914974d17729bcdcc2e6cb012745d70d98a5e,
-            da9e3cda08bedccad0007c77ab572702376cd472,
+            15c9c975f04b7ebe55ea8caf4b8214fd017b21c5,
           ]
     env:
       HUSKY: "0"
@@ -48,8 +48,8 @@ jobs:
         run: python3 ../harness/scripts/verify-firmware-fixture.py
         working-directory: target
         env:
-          EXPECT_SUCCESS: ${{ matrix.revision == 'da9e3cda08bedccad0007c77ab572702376cd472' && '1' || '0' }}
+          EXPECT_SUCCESS: ${{ matrix.revision == '15c9c975f04b7ebe55ea8caf4b8214fd017b21c5' && '1' || '0' }}
       - name: Required static checks
-        if: ${{ !cancelled() && matrix.node == '24.22.1' && matrix.revision == 'da9e3cda08bedccad0007c77ab572702376cd472' }}
+        if: ${{ !cancelled() && matrix.node == '24.22.1' && matrix.revision == '15c9c975f04b7ebe55ea8caf4b8214fd017b21c5' }}
         run: npm run check
         working-directory: target

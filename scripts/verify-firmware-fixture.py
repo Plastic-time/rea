@@ -11,6 +11,9 @@ import tempfile
 repo = Path.cwd()
 flags = re.findall(r'"(--[^" ]+)"', (repo / 'tests/fixtures/firmware/provider.ts').read_text())
 node = shutil.which('node')
+node_version = subprocess.check_output([node, '--version'], text=True).strip()
+if not node_version.startswith('v22.'):
+    flags = [flag for flag in flags if flag != '--no-expose-wasm']
 observations = []
 with tempfile.TemporaryDirectory(prefix='firmware-fixture-', dir=os.environ['RUNNER_TEMP']) as temporary:
     root = Path(temporary)
