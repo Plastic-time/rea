@@ -1,0 +1,72 @@
+name: JavaScript recovery same-host comparison
+on:
+  push:
+    branches: [codex/verify-5672-js-recovery-20261025]
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HUSKY: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+      - run: npm ci --no-audit --no-fund
+      - name: Unchanged upstream production and test, three repetitions
+        run: |
+          mkdir -p comparison-logs
+          npm run build:cached > comparison-logs/baseline-build.log 2>&1
+          for attempt in 1 2 3; do
+            code=0
+            node scripts/run-exact-tests.mjs run tests/boundary/mcp/javascriptAnalysisResources.test.ts > "comparison-logs/baseline-${attempt}.log" 2>&1 || code=$?
+            echo "baseline attempt ${attempt}: ${code}" | tee -a comparison-logs/results.txt
+          done
+      - name: Merge the unchanged PR head and repeat three times
+        run: |
+          git config user.name Plastic-time
+          git config user.email 247457381+Plastic-time@users.noreply.github.com
+          git fetch origin cb8f1f7bdd385f5df78474ca8a04ca5baa6d3827
+          git merge --no-commit --no-ff FETCH_HEAD
+          npm run build:cached > comparison-logs/pr-build.log 2>&1
+          for attempt in 1 2 3; do
+            code=0
+            node scripts/run-exact-tests.mjs run tests/boundary/mcp/javascriptAnalysisResources.test.ts > "comparison-logs/pr-${attempt}.log" 2>&1 || code=$?
+            echo "pr attempt ${attempt}: ${code}" | tee -a comparison-logs/results.txt
+          done
+      - name: Bound timeout-fixture parent capacity independently of worker, five repetitions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tests/boundary/mcp/javascriptAnalysisResources.test.ts')
+          text = path.read_text()
+          before = 'const { client, transport, diagnostics } = createResourceClient();'
+          start = text.index('it("returns a directly usable partial analysis reference')
+          prefix, test = text[:start], text[start:]
+          assert before in test
+          test = test.replace(before, 'const { client, transport, diagnostics } = createResourceClient(1024);', 1)
+          text = prefix + test
+          text = text.replace('const createResourceClient = () => {', 'const createResourceClient = (parentHeapMb = 512) => {')
+          text = text.replace('NODE_OPTIONS: "--max-old-space-size=512 --max-semi-space-size=8",', 'NODE_OPTIONS: `--max-old-space-size=${String(parentHeapMb)} --max-semi-space-size=8`,')
+          path.write_text(text)
+          PY
+          git diff -- tests/boundary/mcp/javascriptAnalysisResources.test.ts > comparison-logs/candidate.diff
+          failed=0
+          for attempt in 1 2 3 4 5; do
+            code=0
+            node scripts/run-exact-tests.mjs run tests/boundary/mcp/javascriptAnalysisResources.test.ts > "comparison-logs/fixed-${attempt}.log" 2>&1 || code=$?
+            echo "fixed attempt ${attempt}: ${code}" | tee -a comparison-logs/results.txt
+            if [ "$code" != 0 ]; then failed=1; fi
+          done
+          exit "$failed"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: js-recovery-comparison
+          path: comparison-logs/
+          retention-days: 7
