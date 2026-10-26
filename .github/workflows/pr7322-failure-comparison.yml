@@ -1,4 +1,4 @@
-name: PR 7322 failure attribution
+name: Upstream fixture repairs paired verification
 on:
   push:
     branches: [codex/verify-pr7322-failures-20261026]
@@ -16,7 +16,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version-file: .nvmrc
-      - name: Compare unchanged revisions on the same runner
+      - name: Compare baseline, independent fixes, and combined fixes
         shell: bash
         run: |
           set -euo pipefail
@@ -25,14 +25,18 @@ jobs:
           printf 'Node: %s\n' "$(node --version)" | tee "$result_dir/environment.txt"
           uname -a >> "$result_dir/environment.txt"
           cat /etc/os-release >> "$result_dir/environment.txt"
-          while read -r label revision; do
+          git fetch --no-tags https://github.com/Plastic-time/rea.git 626d0250dbfe07fc55fe17686b0bc437c510b32b
+          while read -r label revision failures; do
             echo "::group::$label $revision"
-            git fetch --no-tags https://github.com/morluto/rea.git "$revision"
+            git fetch --no-tags https://github.com/Plastic-time/rea.git "$revision"
             checkout_dir="$RUNNER_TEMP/pr7322-$label"
             git worktree add --detach "$checkout_dir" "$revision"
             (
               cd "$checkout_dir"
               test "$(git rev-parse HEAD)" = "$revision"
+              if [ "$label" = combined ]; then
+                git diff 046c4ce353fabe9eccf3ec43a5f9fc29027db05e 626d0250dbfe07fc55fe17686b0bc437c510b32b -- tests/boundary/filesystem/safeOutputTreeCloseFailures.test.ts | git apply
+              fi
               test "$(cat .nvmrc)" = '24.22.1'
               npm ci
               set +e
@@ -40,21 +44,30 @@ jobs:
               status=${PIPESTATUS[0]}
               set -e
               printf '%s %s exit=%s\n' "$label" "$revision" "$status" | tee -a "$result_dir/status.txt"
-              test "$status" -le 1
-              grep -q 'Test Files' "$result_dir/$label.log"
-              git diff --exit-code
+              if [ "$failures" = 0 ]; then
+                test "$status" -eq 0
+                grep -Eq 'Tests[[:space:]]+51 passed' "$result_dir/$label.log"
+              else
+                test "$status" -eq 1
+                grep -Eq "Tests[[:space:]]+$failures failed" "$result_dir/$label.log"
+              fi
+              if [ "$label" != baseline ]; then
+                npm run check:fast
+                npx --no-install oxfmt --check tests/composition/analysis-sessions/providerBinding.test.ts tests/boundary/filesystem/safeOutputTreeCloseFailures.test.ts
+              fi
+              git diff --check
+              if [ "$label" != combined ]; then git diff --exit-code; fi
             )
             echo '::endgroup::'
           done <<'REVISIONS'
-          pr-parent 57d0ed45f7559fc3329a6080a92f68420ae52d63
-          pr-head 5aa7509e1cf852305a3d4da5a1594682b16d3d10
-          ci-base 8706068b57de06141b7d41d1b07ac63d4c7a41cc
-          ci-merge 76b3d85f64ccee23f2094cc6a214d27a03f341fa
-          latest-main e80fb638be5fcff7194455feb358dc193cbc81d7
+          baseline 046c4ce353fabe9eccf3ec43a5f9fc29027db05e 3
+          provider 00aa17f12a1f9db0205fe82104d14e93bec63bdd 2
+          extraction 626d0250dbfe07fc55fe17686b0bc437c510b32b 1
+          combined 00aa17f12a1f9db0205fe82104d14e93bec63bdd 0
           REVISIONS
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: pr7322-failure-comparison
+          name: upstream-fixture-repairs-comparison
           path: comparison-results/
           if-no-files-found: error
