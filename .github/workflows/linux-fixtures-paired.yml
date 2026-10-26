@@ -1,0 +1,39 @@
+name: Linux boundary fixture paired verification
+on:
+  push:
+    branches: [codex/verify-linux-fixtures-20261026]
+permissions:
+  contents: read
+jobs:
+  paired:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 5aa7509e
+          fetch-depth: 2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+      - run: npm ci
+      - name: Reproduce unchanged baseline
+        shell: bash
+        run: |
+          git restore --source=57d0ed45f7559fc3329a6080a92f68420ae52d63 -- tests/boundary/cli/ghidraJavaDoctor.test.ts tests/boundary/mcp/artifactInspectionCoverageMcp.test.ts
+          set +e
+          npm run test:focused -- tests/boundary/cli/ghidraJavaDoctor.test.ts tests/boundary/mcp/artifactInspectionCoverageMcp.test.ts 2>&1 | tee /tmp/baseline.log
+          status=${PIPESTATUS[0]}
+          set -e
+          test "$status" -eq 1
+          grep -q 'spawn ps ENOENT' /tmp/baseline.log
+          grep -q 'unsupported binary format' /tmp/baseline.log
+      - name: Verify candidate
+        run: |
+          git restore --source=HEAD -- tests/boundary/cli/ghidraJavaDoctor.test.ts tests/boundary/mcp/artifactInspectionCoverageMcp.test.ts
+          npm run test:focused -- tests/boundary/cli/ghidraJavaDoctor.test.ts tests/boundary/mcp/artifactInspectionCoverageMcp.test.ts
+      - name: Static checks
+        run: |
+          npm run check:fast
+          npx prettier --check tests/boundary/cli/ghidraJavaDoctor.test.ts tests/boundary/mcp/artifactInspectionCoverageMcp.test.ts
+          git diff --exit-code
