@@ -62,9 +62,9 @@ jobs:
             echo '::endgroup::'
           done <<'REVISIONS'
           baseline 046c4ce353fabe9eccf3ec43a5f9fc29027db05e 3
-          provider 00aa17f12a1f9db0205fe82104d14e93bec63bdd 2
+          provider 8658353b0d0bce41c9f2501e048622b98775b641 2
           extraction 626d0250dbfe07fc55fe17686b0bc437c510b32b 1
-          combined 00aa17f12a1f9db0205fe82104d14e93bec63bdd 0
+          combined 8658353b0d0bce41c9f2501e048622b98775b641 0
           REVISIONS
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
