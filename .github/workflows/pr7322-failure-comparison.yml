@@ -1,0 +1,60 @@
+name: PR 7322 failure attribution
+on:
+  push:
+    branches: [codex/verify-pr7322-failures-20261026]
+permissions:
+  contents: read
+jobs:
+  comparison:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      HUSKY: '0'
+      FORCE_COLOR: '0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+      - name: Compare unchanged revisions on the same runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/comparison-results"
+          result_dir="$GITHUB_WORKSPACE/comparison-results"
+          printf 'Node: %s\n' "$(node --version)" | tee "$result_dir/environment.txt"
+          uname -a >> "$result_dir/environment.txt"
+          cat /etc/os-release >> "$result_dir/environment.txt"
+          while read -r label revision; do
+            echo "::group::$label $revision"
+            git fetch --no-tags https://github.com/morluto/rea.git "$revision"
+            checkout_dir="$RUNNER_TEMP/pr7322-$label"
+            git worktree add --detach "$checkout_dir" "$revision"
+            (
+              cd "$checkout_dir"
+              test "$(git rev-parse HEAD)" = "$revision"
+              test "$(cat .nvmrc)" = '24.22.1'
+              npm ci
+              set +e
+              npm run test:focused -- tests/composition/analysis-sessions/providerBinding.test.ts src/artifacts/apple/AppleAssetCatalogAnalysis.test.ts tests/boundary/filesystem/safeOutputTreeCloseFailures.test.ts 2>&1 | tee "$result_dir/$label.log"
+              status=${PIPESTATUS[0]}
+              set -e
+              printf '%s %s exit=%s\n' "$label" "$revision" "$status" | tee -a "$result_dir/status.txt"
+              test "$status" -le 1
+              grep -q 'Test Files' "$result_dir/$label.log"
+              git diff --exit-code
+            )
+            echo '::endgroup::'
+          done <<'REVISIONS'
+          pr-parent 57d0ed45f7559fc3329a6080a92f68420ae52d63
+          pr-head 5aa7509e1cf852305a3d4da5a1594682b16d3d10
+          ci-base 8706068b57de06141b7d41d1b07ac63d4c7a41cc
+          ci-merge 76b3d85f64ccee23f2094cc6a214d27a03f341fa
+          latest-main e80fb638be5fcff7194455feb358dc193cbc81d7
+          REVISIONS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: pr7322-failure-comparison
+          path: comparison-results/
+          if-no-files-found: error
