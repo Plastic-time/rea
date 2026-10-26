@@ -35,5 +35,5 @@ jobs:
       - name: Static checks
         run: |
           npm run check:fast
-          npx prettier --check tests/boundary/cli/ghidraJavaDoctor.test.ts tests/boundary/mcp/artifactInspectionCoverageMcp.test.ts
+          npx --no-install oxfmt --check tests/boundary/cli/ghidraJavaDoctor.test.ts tests/boundary/mcp/artifactInspectionCoverageMcp.test.ts
           git diff --exit-code
