@@ -43,13 +43,14 @@ jobs:
               npm run test:focused -- tests/composition/analysis-sessions/providerBinding.test.ts src/artifacts/apple/AppleAssetCatalogAnalysis.test.ts tests/boundary/filesystem/safeOutputTreeCloseFailures.test.ts 2>&1 | tee "$result_dir/$label.log"
               status=${PIPESTATUS[0]}
               set -e
+              sed -E 's/\x1B\[[0-9;]*[mK]//g' "$result_dir/$label.log" > "$result_dir/$label.plain.log"
               printf '%s %s exit=%s\n' "$label" "$revision" "$status" | tee -a "$result_dir/status.txt"
               if [ "$failures" = 0 ]; then
                 test "$status" -eq 0
-                grep -Eq 'Tests[[:space:]]+51 passed' "$result_dir/$label.log"
+                grep -Eq 'Tests[[:space:]]+51 passed' "$result_dir/$label.plain.log"
               else
                 test "$status" -eq 1
-                grep -Eq "Tests[[:space:]]+$failures failed" "$result_dir/$label.log"
+                grep -Eq "Tests[[:space:]]+$failures failed" "$result_dir/$label.plain.log"
               fi
               if [ "$label" != baseline ]; then
                 npm run check:fast
