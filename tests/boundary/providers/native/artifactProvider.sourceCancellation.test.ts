@@ -5,6 +5,7 @@
  * - without cancellation, extraction publishes the original bytes.
  */
 import { createPackage } from "@electron/asar";
+import { createHash } from "node:crypto";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
@@ -26,7 +27,9 @@ it.each(["cancel", "denied-rollback", "control"] as const)(
     const client = new ArtifactProvider(process.env).createClient({
       path: archive,
       sourcePath: archive,
-      sha256: "0".repeat(64),
+      sha256: createHash("sha256")
+        .update(await readFile(archive))
+        .digest("hex"),
       kind: "archive",
       format: "asar",
     });
