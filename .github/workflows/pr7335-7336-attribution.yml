@@ -1,0 +1,73 @@
+name: PR 7335 and 7336 same-runner failure attribution
+on:
+  push:
+    branches: [codex/verify-7335-7336-ci-20261027]
+permissions:
+  contents: read
+jobs:
+  comparison:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HUSKY: '0'
+      FORCE_COLOR: '0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.22.1
+      - name: Compare unchanged upstream and exact CI merge revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          result_dir="$GITHUB_WORKSPACE/comparison-results"
+          mkdir -p "$result_dir"
+          node --version | tee "$result_dir/environment.txt"
+          npm --version >> "$result_dir/environment.txt"
+          cat /etc/os-release >> "$result_dir/environment.txt"
+          uname -a >> "$result_dir/environment.txt"
+          git fetch --no-tags https://github.com/morluto/rea.git 2ad599daceb238347d379f81ca170cf662901a49 55e16655d4ce963426f2c8860b65de4bdcbf3cb0 50de0fac97ead1bd9594b7d43a336acd2bbfecc3
+          while read -r label revision expected_failures; do
+            echo "::group::$label $revision"
+            checkout_dir="$RUNNER_TEMP/rea-attribution-$label"
+            git worktree add --detach "$checkout_dir" "$revision"
+            (
+              cd "$checkout_dir"
+              test "$(git rev-parse HEAD)" = "$revision"
+              test "$(cat .nvmrc)" = '24.22.1'
+              if [ "$label" = combined ]; then
+                git diff 2ad599daceb238347d379f81ca170cf662901a49 55e16655d4ce963426f2c8860b65de4bdcbf3cb0 -- tests/boundary/filesystem/safeOutputTreeCloseFailures.test.ts | git apply
+              else
+                git diff --exit-code
+              fi
+              git diff --stat | tee "$result_dir/$label.diff.txt"
+              npm ci
+              set +e
+              npm run test:focused -- tests/boundary/browser/sazWebCapture.test.ts tests/composition/analysis-sessions/providerBinding.test.ts tests/boundary/filesystem/safeOutputTreeCloseFailures.test.ts 2>&1 | tee "$result_dir/$label.log"
+              status=${PIPESTATUS[0]}
+              set -e
+              sed -E 's/\x1B\[[0-9;]*[mK]//g' "$result_dir/$label.log" > "$result_dir/$label.plain.log"
+              printf '%s %s exit=%s\n' "$label" "$revision" "$status" | tee -a "$result_dir/status.txt"
+              grep -E ' FAIL |Test Files|Tests  ' "$result_dir/$label.plain.log" | tee "$result_dir/$label.failures.txt"
+              test "$status" -eq 1
+              grep -Eq "Tests[[:space:]]+$expected_failures failed" "$result_dir/$label.plain.log"
+              test "$(grep -c ' FAIL .*sazWebCapture.test.ts' "$result_dir/$label.plain.log")" -eq 2
+              grep -F 'checks trailer credentials before hidden metadata blocks analysis and withholds unchecked source' "$result_dir/$label.failures.txt"
+              grep -F 'rejects expanded-limit before returning a selected subset' "$result_dir/$label.failures.txt"
+              grep -F 'to not have property "partial_observation"' "$result_dir/$label.plain.log"
+              git diff --check
+              if [ "$label" != combined ]; then git diff --exit-code; fi
+            )
+            echo '::endgroup::'
+          done <<'REVISIONS'
+          baseline 2ad599daceb238347d379f81ca170cf662901a49 5
+          pr7335 55e16655d4ce963426f2c8860b65de4bdcbf3cb0 3
+          pr7336 50de0fac97ead1bd9594b7d43a336acd2bbfecc3 4
+          combined 50de0fac97ead1bd9594b7d43a336acd2bbfecc3 2
+          REVISIONS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: pr7335-7336-failure-attribution
+          path: comparison-results/
+          if-no-files-found: error
