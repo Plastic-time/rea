@@ -8,6 +8,7 @@ import {
   pkcs7SignedDataFixture,
   pkcs7SignedDataIndefiniteEnvelopeFixture,
 } from "../../src/native/pe/PeCertificates.fixture.js";
+import { readAsn1 } from "../../src/native/pe/PeCertificateAsn1.js";
 import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
 import { cliTest } from "../support/cli/cliFixture.js";
 
@@ -139,5 +140,121 @@ cliTest(
       code: "invalid_request",
       details: { operation: "inspect_pe_certificates" },
     });
+  },
+);
+
+/** One DER TLV with a minimal definite length. */
+const derValue = (tag: number, ...parts: Buffer[]): Buffer => {
+  const content = Buffer.concat(parts);
+  const octets: number[] = [];
+  for (let rest = content.length; rest > 0; rest = Math.floor(rest / 256))
+    octets.unshift(rest % 256);
+  const length =
+    content.length < 0x80
+      ? [content.length]
+      : [0x80 | octets.length, ...octets];
+  return Buffer.concat([Buffer.from([tag, ...length]), content]);
+};
+
+/** The fixture's SignedData with its one certificate repeated `count` times. */
+const repeatedCertificateSignedData = (count: number): Buffer => {
+  const fixture = pkcs7SignedDataFixture();
+  const raw = (node: { start: number; end: number } | undefined): Buffer => {
+    if (node === undefined) throw new Error("Unexpected fixture layout");
+    return fixture.subarray(node.start, node.end);
+  };
+  const [type, explicit] = readAsn1(fixture).children;
+  const [version, digests, encapsulated, certificates, signers] =
+    explicit?.children[0]?.children ?? [];
+  const certificate = raw(certificates?.children[0]);
+  return derValue(
+    0x30,
+    raw(type),
+    derValue(
+      0xa0,
+      derValue(
+        0x30,
+        raw(version),
+        raw(digests),
+        raw(encapsulated),
+        derValue(0xa0, ...Array.from({ length: count }, () => certificate)),
+        raw(signers),
+      ),
+    ),
+  );
+};
+
+cliTest(
+  "inventories repeated certificates within both decoder allowances",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-pe-cert-cli-repeated-");
+    const path = join(root, "chain.exe");
+    await writeFile(
+      path,
+      peCertificateFixture(false, repeatedCertificateSignedData(200)),
+    );
+
+    const result = await cli.run({
+      arguments: ["inspect-pe-certificates", path, "--json"],
+    });
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    const evidence = toolContract("inspect_pe_certificates").outputSchema.parse(
+      result.json,
+    );
+    expect(
+      evidence.normalized_result.entries[0]?.pkcs7?.certificates,
+    ).toHaveLength(200);
+  },
+);
+
+cliTest.for([
+  // Each repeated certificate decodes to 43 ASN.1 values and about 200 bytes
+  // of text, so 350 stay within the value allowance and exceed the text one.
+  {
+    allowance: "decoded certificate text",
+    certificates: 350,
+    limits: { max_decoded_text_bytes: 65_536 },
+    message: "65536-byte decoded budget",
+  },
+  {
+    allowance: "ASN.1 value count",
+    certificates: 600,
+    limits: { max_asn1_values: 16_384 },
+    message: "16384-node budget",
+  },
+])(
+  "reports the fixed $allowance allowance as a resource constraint",
+  async ({ certificates, limits, message }, { cli }) => {
+    const root = await createTestTempDirectory("rea-pe-cert-cli-allowance-");
+    const path = join(root, "large.exe");
+    await writeFile(
+      path,
+      peCertificateFixture(false, repeatedCertificateSignedData(certificates)),
+    );
+
+    const result = await cli.run({
+      arguments: ["inspect-pe-certificates", path, "--json"],
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.json).toMatchObject({
+      code: "resource_constraint",
+      retryable: false,
+      details: {
+        operation: "inspect_pe_certificates",
+        reported_limits: limits,
+      },
+    });
+    const { message: reason, remediation } = result.json as {
+      message: string;
+      remediation: { action: string };
+    };
+    expect(reason).toContain(message);
+    expect(remediation.action).toContain(String(Object.values(limits)[0]));
+    expect(remediation.action).toContain("no runtime override");
+    expect(remediation.action).toContain(
+      "Repeating the unchanged request fails the same way",
+    );
   },
 );
