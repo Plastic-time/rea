@@ -325,6 +325,83 @@ const expectImportEqualsRelationships = (
   ).toHaveLength(0);
 };
 
+cliTest(
+  "follows the nearest package type for an unbound require in .js sources",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-package-type-requires-");
+    const source = (dependency: string) =>
+      `try { console.log(require(${JSON.stringify(dependency)})); } catch (error) { console.log(error.name); }\n`;
+    // The nearest package.json owns each .js file's scope (Node packages.md,
+    // "Determining module system").
+    await writeFixtureFiles(root, {
+      "package.json": JSON.stringify({ type: "module" }),
+      "main.js": source("./dep.cjs"),
+      "dep.cjs": "module.exports = 1;\n",
+      "legacy/package.json": JSON.stringify({ type: "commonjs" }),
+      "legacy/main.js": source("../dep.cjs"),
+      "untyped/package.json": JSON.stringify({}),
+      "untyped/main.js": source("../dep.cjs"),
+    });
+    for (const [path, expected] of [
+      ["main.js", "ReferenceError"],
+      ["legacy/main.js", "1"],
+      ["untyped/main.js", "1"],
+    ] as const) {
+      const control = await execute(process.execPath, [join(root, path)], {
+        cwd: root,
+        timeout: 5_000,
+      });
+      expect(control.stdout.trim(), path).toBe(expected);
+    }
+
+    const response = await cli.run({
+      arguments: ["analyze-javascript-application", root, "--format", "json"],
+      environment: { REA_LOG_LEVEL: "silent" },
+    });
+
+    expect(response.exitCode, response.stderr).toBe(0);
+    const { graph } = javascriptApplicationAnalysisResultSchema.parse(
+      parseEvidence(response.json).normalized_result,
+    );
+    const facts = (path: string) => {
+      const module = graph.nodes
+        .flatMap(({ observations }) => observations)
+        .find(
+          ({ properties }) =>
+            properties.semantic_role === "source-module" &&
+            properties.path === path,
+        )?.properties;
+      const requires = graph.edges.filter(
+        ({ relation, properties, evidence }) =>
+          relation === "imports" &&
+          properties.module_link_kind === "require" &&
+          evidence.location.available &&
+          evidence.location.value.kind === "source-range" &&
+          evidence.location.value.source === path,
+      );
+      return {
+        module_format: module?.module_format,
+        import_relationships: module?.import_relationships,
+        require_targets: requires.map(({ properties }) => [
+          properties.resolved_path,
+          properties.resolution_status,
+        ]),
+      };
+    };
+    expect(facts("main.js")).toEqual({
+      module_format: "unknown",
+      import_relationships: 0,
+      require_targets: [],
+    });
+    for (const path of ["legacy/main.js", "untyped/main.js"])
+      expect(facts(path), path).toEqual({
+        module_format: "commonjs",
+        import_relationships: 1,
+        require_targets: [["dep.cjs", "resolved"]],
+      });
+  },
+);
+
 cliTest.for(["CLI", "stdio MCP"] as const)(
   "retains unbound CommonJS semantic relationships through %s",
   async (surface, { cli }) => {
