@@ -167,12 +167,12 @@ describe("CLI output argument boundary", () => {
 });
 
 it("formats arrays of empty objects without column keys as JSON in Markdown", () => {
-  expect(renderCliDocument([{}], "md", false)).toBe("\\[\\{\\}\\]\n");
+  expect(renderCliDocument([{}], "md", false)).toBe("\\[&#123;&#125;\\]\n");
   expect(renderCliDocument([{}, {}], "md", false)).toBe(
-    "\\[\\{\\},\\{\\}\\]\n",
+    "\\[&#123;&#125;,&#123;&#125;\\]\n",
   );
   expect(renderCliDocument({ empty: [{}] }, "md", false)).toBe(
-    "## empty\n\n\\[\\{\\}\\]\n",
+    "## empty\n\n\\[&#123;&#125;\\]\n",
   );
 });
 

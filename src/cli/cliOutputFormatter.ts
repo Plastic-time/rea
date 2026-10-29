@@ -323,10 +323,12 @@ const escapeTableCell = (value: string): string =>
       (character) =>
         `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
     )
-    .replace(/[\\|`*[\]~{}#]|_+/g, escapeInlineSyntax)
+    .replace(/[\\|`*[\]~#]|_+/g, escapeInlineSyntax)
     // Encode renderer-extension introducers at the same boundary as HTML
     // characters. Generated entities must not themselves be re-escaped.
-    .replace(/[&<>:]|;(?=-?[)(])/g, (character) => {
+    // A backslash-escaped brace still reaches the HTML as `{`, where Vue
+    // (VitePress pages) evaluates `{{ ... }}`; an entity does not.
+    .replace(/[&<>:{}]|;(?=-?[)(])/g, (character) => {
       switch (character) {
         case "&":
           return "&amp;";
@@ -336,6 +338,10 @@ const escapeTableCell = (value: string): string =>
           return "&gt;";
         case ":":
           return "&#58;";
+        case "{":
+          return "&#123;";
+        case "}":
+          return "&#125;";
         default:
           return "&#59;";
       }

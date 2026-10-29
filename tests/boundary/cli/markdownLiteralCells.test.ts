@@ -367,3 +367,60 @@ cliTest(
     }
   },
 );
+
+cliTest(
+  "keeps mustache-shaped facts literal in VitePress page HTML",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-markdown-mustache-");
+    const path = join(root, "bundle.json");
+    const result = {
+      "{{ key }}": "{{ 6 * 7 }}",
+      scalar: "a{{b}}c",
+      rows: [{ value: "{{ constructor }}", nested: { path: "{{x}}" } }],
+    };
+    const record = createEvidence(
+      undefined,
+      { id: "fixture", name: "Fixture", version: "1" },
+      { operation: "ordinary-json", parameters: {}, result },
+    );
+    await writeFile(path, JSON.stringify(createEvidenceBundle([record])));
+    const base = [
+      "inspect-evidence-bundle",
+      JSON.stringify({ path, detail: "complete" }),
+      "--filter-output",
+      "records.0.normalized_result",
+    ];
+    const markdown = await cli.run({ arguments: [...base, "--format", "md"] });
+    const json = await cli.run({ arguments: [...base, "--json"] });
+    expect(markdown.exitCode, markdown.stderr).toBe(0);
+    expect(json.exitCode, json.stderr).toBe(0);
+    expect(JSON.parse(json.stdout)).toEqual({
+      records: { "0": { normalized_result: result } },
+    });
+    const renderer = await createMarkdownRenderer(root, { linkify: false });
+    for (const document of [
+      markdown.stdout,
+      renderCliDocument(result, "md", false),
+    ]) {
+      const html = renderer.render(document);
+      // VitePress compiles page HTML as a Vue template, where `{{` starts an
+      // interpolation that replaces the literal fact with its evaluation.
+      expect(html).not.toContain("{{");
+      const text = (node: DefaultTreeAdapterTypes.Node): string =>
+        node.nodeName === "#text" && "value" in node
+          ? node.value
+          : "childNodes" in node
+            ? node.childNodes.map(text).join("")
+            : "";
+      const rendered = text(parseFragment(html));
+      for (const literal of [
+        "{{ key }}",
+        "{{ 6 * 7 }}",
+        "a{{b}}c",
+        "{{ constructor }}",
+        JSON.stringify(result.rows[0]?.nested),
+      ])
+        expect(rendered).toContain(literal);
+    }
+  },
+);
