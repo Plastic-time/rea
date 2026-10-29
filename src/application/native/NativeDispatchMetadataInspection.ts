@@ -6,6 +6,8 @@ import {
   inspectNativeDispatchMetadata,
 } from "../../domain/native/objcSwiftMetadata.js";
 import { AnalysisOutputError } from "../../domain/analysisErrorCore.js";
+import type { AnalysisError } from "../../domain/analysisErrorBase.js";
+import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
 import { jsonValueSchema } from "../../domain/jsonValue.js";
 import { err, ok } from "../../domain/result.js";
 import type { AnalysisOperationPort } from "../AnalysisProvider.js";
@@ -78,15 +80,23 @@ export const inspectNativeDispatch = async (
   }
   if (!permitsCapabilityFallback(binaryMetadata.error))
     return err(binaryMetadata.error);
+  // A failed fallback stays primary but keeps why binary metadata was refused.
+  const binaryMetadataError = binaryMetadata.error;
+  const fallbackFailure = (failure: AnalysisError) =>
+    err(
+      failure.retainSecondaryFailure(binaryMetadataError, {
+        binary_metadata_error: projectAnalysisError(binaryMetadataError),
+      }),
+    );
   const execution = await analysis.execute(
     NATIVE_DISPATCH_METADATA_SOURCES.symbols,
     {},
     signal === undefined ? {} : { signal },
   );
-  if (!execution.ok) return err(execution.error);
+  if (!execution.ok) return fallbackFailure(execution.error);
   const names = dispatchNameInventorySchema.safeParse(execution.value.result);
   if (!names.success)
-    return err(
+    return fallbackFailure(
       new AnalysisOutputError(
         NATIVE_DISPATCH_METADATA_SOURCES.symbols,
         "provider returned an invalid inventory",
