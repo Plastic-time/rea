@@ -365,10 +365,14 @@ cliTest(
     const source = (dependency: string) =>
       `try { console.log(require(${JSON.stringify(dependency)})); } catch (error) { console.log(error.name); }\n`;
     // The nearest package.json owns each .js file's scope (Node packages.md,
-    // "Determining module system").
+    // "Determining module system"). Requiring Electron, directly or through a
+    // local loader, does not give a Node-loaded module a require.
     await writeFixtureFiles(root, {
       "package.json": JSON.stringify({ type: "module" }),
       "main.js": source("./dep.cjs"),
+      "electron-main.js":
+        'try { require("electron"); console.log(require("./dep.cjs")); } catch (error) { console.log(error.name); }\n',
+      "shadowed.js": `function load(require) { return require("electron").contextBridge; }\n${source("./dep.cjs")}`,
       "dep.cjs": "module.exports = 1;\n",
       "legacy/package.json": JSON.stringify({ type: "commonjs" }),
       "legacy/main.js": source("../dep.cjs"),
@@ -377,6 +381,8 @@ cliTest(
     });
     for (const [path, expected] of [
       ["main.js", "ReferenceError"],
+      ["electron-main.js", "ReferenceError"],
+      ["shadowed.js", "ReferenceError"],
       ["legacy/main.js", "1"],
       ["untyped/main.js", "1"],
     ] as const) {
@@ -396,11 +402,12 @@ cliTest(
     const { graph } = javascriptApplicationAnalysisResultSchema.parse(
       parseEvidence(response.json).normalized_result,
     );
-    expect(sourceRequireFacts(graph, "main.js")).toEqual({
-      module_format: "unknown",
-      import_relationships: 0,
-      require_targets: [],
-    });
+    for (const path of ["main.js", "electron-main.js", "shadowed.js"])
+      expect(sourceRequireFacts(graph, path), path).toEqual({
+        module_format: "unknown",
+        import_relationships: 0,
+        require_targets: [],
+      });
     for (const path of ["legacy/main.js", "untyped/main.js"])
       expect(sourceRequireFacts(graph, path), path).toEqual({
         module_format: "commonjs",

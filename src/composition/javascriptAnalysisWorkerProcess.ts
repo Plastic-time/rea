@@ -1,6 +1,11 @@
+import {
+  hasElectronRendererEvidence,
+  mayRunUnderElectronScriptLoader,
+} from "../domain/javascript/electronScriptLoaderEvidence.js";
 import { moduleResolutionModeForJavaScriptReference } from "../domain/javascript/javascriptModuleResolutionMode.js";
 import { parseJavaScriptSource } from "../domain/javascript/javascriptSourceParser.js";
 import { analyzeParsedJavaScriptStaticSourceSteps } from "../domain/javascript/javascriptStaticAnalysis.js";
+import type { JavaScriptStaticAnalysis } from "../domain/javascript/javascriptStaticAnalysisTypes.js";
 import { analyzeParsedJavaScriptSemanticsSteps } from "../domain/javascript/javascriptSemanticAnalysis.js";
 import { failedJavaScriptStaticAnalysis } from "../domain/javascript/javascriptStaticAnalysisHelpers.js";
 import { projectJavaScriptModuleSemantics } from "../domain/javascript/javascriptModuleSemanticIr.js";
@@ -31,7 +36,23 @@ const analyze: JavaScriptSourceWorkerAnalyzer = async (
     return null;
   }
   await callbacks.phase("static");
-  const facts = await completeJavaScriptAnalysisSteps(
+  let facts: JavaScriptStaticAnalysis | undefined;
+  if (mayRunUnderElectronScriptLoader(parsed.program)) {
+    // Renderer-side evidence is read outside the package scope, where an
+    // unbound require keeps its Electron identity; with that evidence the
+    // whole source keeps that context, so its static and semantic facts agree.
+    const script = parseJavaScriptSource(file.text.value, file.path);
+    if (script !== null) {
+      const scriptFacts = await completeJavaScriptAnalysisSteps(
+        analyzeParsedJavaScriptStaticSourceSteps(file.text.value, script),
+      );
+      if (hasElectronRendererEvidence(scriptFacts.electron)) {
+        parsed = script;
+        facts = scriptFacts;
+      }
+    }
+  }
+  facts ??= await completeJavaScriptAnalysisSteps(
     analyzeParsedJavaScriptStaticSourceSteps(file.text.value, parsed),
   );
   const resultBudgetBytes = await callbacks.checkpoint(facts);
