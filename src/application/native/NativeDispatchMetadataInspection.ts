@@ -6,6 +6,7 @@ import {
   inspectNativeDispatchMetadata,
 } from "../../domain/native/objcSwiftMetadata.js";
 import { AnalysisOutputError } from "../../domain/analysisErrorCore.js";
+import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
 import { jsonValueSchema } from "../../domain/jsonValue.js";
 import { err, ok } from "../../domain/result.js";
 import type { AnalysisOperationPort } from "../AnalysisProvider.js";
@@ -83,7 +84,14 @@ export const inspectNativeDispatch = async (
     {},
     signal === undefined ? {} : { signal },
   );
-  if (!execution.ok) return err(execution.error);
+  // The symbol inventory only ran because binary metadata was unavailable;
+  // its failure must not hide that established reason.
+  if (!execution.ok)
+    return err(
+      execution.error.retainDiagnostics({
+        binary_metadata_error: projectAnalysisError(binaryMetadata.error),
+      }),
+    );
   const names = dispatchNameInventorySchema.safeParse(execution.value.result);
   if (!names.success)
     return err(
