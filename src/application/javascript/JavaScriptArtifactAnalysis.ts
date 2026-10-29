@@ -395,7 +395,8 @@ const addStructuredObservations = (
  * Node's package scope for a source is its nearest package.json; the lookup
  * stops at a `node_modules` directory (Node's package scope resolution). Only
  * a same-container, readable manifest object establishes the type; any other
- * nearest manifest, or none in the inventory, leaves the scope unknown.
+ * nearest manifest, including one whose bytes are unavailable, or none in the
+ * inventory, leaves the scope unknown.
  */
 const packageTypeLookup = (
   fileSet: JavaScriptArtifactFileSet,
@@ -408,13 +409,23 @@ const packageTypeLookup = (
         `${file.container_sha256}:${posix.dirname(file.path)}`,
         file,
       );
+  const unavailableManifests = new Set(
+    fileSet.unavailable_relevant_files
+      .filter(({ path }) => posix.basename(path) === "package.json")
+      .map(
+        ({ path, container_sha256 }) =>
+          `${container_sha256}:${posix.dirname(path)}`,
+      ),
+  );
   return (file) => {
     for (
       let directory = posix.dirname(file.path);
       posix.basename(directory) !== "node_modules";
       directory = posix.dirname(directory)
     ) {
-      const manifest = manifests.get(`${file.container_sha256}:${directory}`);
+      const key = `${file.container_sha256}:${directory}`;
+      if (unavailableManifests.has(key)) return "unknown";
+      const manifest = manifests.get(key);
       if (manifest !== undefined) {
         const document = jsonDocuments.read(manifest);
         if (document.status !== "included" || document.packageFields === null)
