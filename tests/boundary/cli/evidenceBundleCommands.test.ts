@@ -168,6 +168,64 @@ cliTest.for([
 );
 
 cliTest.for([
+  {
+    field: "path",
+    empty: ["evidence-import", ""],
+    relative: ["evidence-import", "bundle.json"],
+  },
+  {
+    field: "source",
+    empty: ["evidence-export", "", "exported.json"],
+    relative: ["evidence-export", "bundle.json", "exported.json"],
+  },
+  {
+    field: "output",
+    empty: ["evidence-export", "bundle.json", ""],
+    relative: ["evidence-export", "bundle.json", "exported.json"],
+  },
+  {
+    field: "left",
+    empty: ["compare", "", "bundle.json"],
+    relative: ["compare", "bundle.json", "bundle.json"],
+  },
+  {
+    field: "right",
+    empty: ["compare", "bundle.json", ""],
+    relative: ["compare", "bundle.json", "bundle.json"],
+  },
+])(
+  "rejects an empty $field argument before resolving the working directory",
+  async ({ field, empty, relative }, { cli }) => {
+    const root = await createTestTempDirectory("rea-empty-evidence-path-");
+    await writeFile(
+      join(root, "bundle.json"),
+      JSON.stringify(createEvidenceBundle([])),
+    );
+    // docs/cli.md: an empty string never selects the working directory.
+    const refused = await cli.run({
+      arguments: [...empty, "--json"],
+      cwd: root,
+      environment: { REA_LOG_LEVEL: "silent" },
+    });
+    expect(refused.exitCode).toBe(1);
+    expect(refused.json).toMatchObject({
+      code: "VALIDATION_ERROR",
+      fieldErrors: [
+        expect.objectContaining({ path: field, code: "too_small" }),
+      ],
+    });
+    expect(await readdir(root)).toEqual(["bundle.json"]);
+    // Relative names still resolve against the working directory.
+    const accepted = await cli.run({
+      arguments: [...relative, "--json"],
+      cwd: root,
+      environment: { REA_LOG_LEVEL: "silent" },
+    });
+    expect(accepted.exitCode, accepted.stderr).toBe(0);
+  },
+);
+
+cliTest.for([
   "export_evidence_bundle",
   "compare_bundles",
   "get_evidence_bundle",
