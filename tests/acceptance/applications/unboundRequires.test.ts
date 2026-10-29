@@ -325,6 +325,39 @@ const expectImportEqualsRelationships = (
   ).toHaveLength(0);
 };
 
+/** Source-module facts and semantic require edges of one analyzed source. */
+const sourceRequireFacts = (
+  graph: ReturnType<
+    typeof javascriptApplicationAnalysisResultSchema.parse
+  >["graph"],
+  path: string,
+) => {
+  const module = graph.nodes
+    .flatMap(({ observations }) => observations)
+    .find(
+      ({ properties }) =>
+        properties.semantic_role === "source-module" &&
+        properties.path === path,
+    )?.properties;
+  const requires = graph.edges.filter(
+    ({ relation, properties, evidence }) =>
+      relation === "imports" &&
+      properties.module_link_kind === "require" &&
+      evidence.location.available &&
+      evidence.location.value.kind === "source-range" &&
+      evidence.location.value.source === path,
+  );
+  return {
+    module_format: module?.module_format,
+    import_relationships: module?.import_relationships,
+    require_targets: requires.map(({ properties }) => [
+      properties.specifier,
+      properties.resolved_path,
+      properties.resolution_status,
+    ]),
+  };
+};
+
 cliTest(
   "follows the nearest package type for an unbound require in .js sources",
   async ({ cli }) => {
@@ -363,42 +396,68 @@ cliTest(
     const { graph } = javascriptApplicationAnalysisResultSchema.parse(
       parseEvidence(response.json).normalized_result,
     );
-    const facts = (path: string) => {
-      const module = graph.nodes
-        .flatMap(({ observations }) => observations)
-        .find(
-          ({ properties }) =>
-            properties.semantic_role === "source-module" &&
-            properties.path === path,
-        )?.properties;
-      const requires = graph.edges.filter(
-        ({ relation, properties, evidence }) =>
-          relation === "imports" &&
-          properties.module_link_kind === "require" &&
-          evidence.location.available &&
-          evidence.location.value.kind === "source-range" &&
-          evidence.location.value.source === path,
-      );
-      return {
-        module_format: module?.module_format,
-        import_relationships: module?.import_relationships,
-        require_targets: requires.map(({ properties }) => [
-          properties.resolved_path,
-          properties.resolution_status,
-        ]),
-      };
-    };
-    expect(facts("main.js")).toEqual({
+    expect(sourceRequireFacts(graph, "main.js")).toEqual({
       module_format: "unknown",
       import_relationships: 0,
       require_targets: [],
     });
     for (const path of ["legacy/main.js", "untyped/main.js"])
-      expect(facts(path), path).toEqual({
+      expect(sourceRequireFacts(graph, path), path).toEqual({
         module_format: "commonjs",
         import_relationships: 1,
-        require_targets: [["dep.cjs", "resolved"]],
+        require_targets: [["../dep.cjs", "dep.cjs", "resolved"]],
       });
+  },
+);
+
+cliTest(
+  "keeps Electron's script loader for a .js preload in a module package scope",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-package-type-preload-");
+    // Electron's preload loader ignores "type": "module" ("ES Modules (ESM)
+    // in Electron"); main.mjs is an ES module by its suffix.
+    await writeFixtureFiles(root, {
+      "package.json": JSON.stringify({ type: "module", main: "main.mjs" }),
+      "main.mjs": [
+        'import { app, BrowserWindow, ipcMain } from "electron";',
+        'import { fileURLToPath } from "node:url";',
+        'ipcMain.handle("ping", () => "pong");',
+        "app.whenReady().then(() => {",
+        "  const window = new BrowserWindow({",
+        '    webPreferences: { preload: fileURLToPath(new URL("./preload.js", import.meta.url)) },',
+        "  });",
+        '  window.loadFile("index.html");',
+        "});",
+      ].join("\n"),
+      "preload.js": [
+        'const { contextBridge, ipcRenderer } = require("electron");',
+        'contextBridge.exposeInMainWorld("api", { ping: () => ipcRenderer.invoke("ping") });',
+      ].join("\n"),
+      "index.html": "<!doctype html><title>app</title>\n",
+    });
+
+    const response = await cli.run({
+      arguments: ["analyze-javascript-application", root, "--format", "json"],
+      environment: { REA_LOG_LEVEL: "silent" },
+    });
+
+    expect(response.exitCode, response.stderr).toBe(0);
+    const { graph, summary } = javascriptApplicationAnalysisResultSchema.parse(
+      parseEvidence(response.json).normalized_result,
+    );
+    expect(sourceRequireFacts(graph, "preload.js")).toEqual({
+      module_format: "commonjs",
+      import_relationships: 2,
+      require_targets: [
+        ["electron", null, "external"],
+        ["electron", null, "external"],
+      ],
+    });
+    expect(summary.ipc).toMatchObject({
+      main_handlers: 1,
+      renderer_transmissions: 1,
+      paired_renderer_transmissions: 1,
+    });
   },
 );
 
