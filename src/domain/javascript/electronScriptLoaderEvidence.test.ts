@@ -1,7 +1,8 @@
 import { expect, it } from "vitest";
 
 import {
-  electronRendererEvidenceSteps,
+  hasElectronRendererEvidence,
+  mayHaveElectronRendererEvidenceSteps,
   mayRunUnderElectronScriptLoader,
 } from "./electronScriptLoaderEvidence.js";
 import { completeSemanticSteps } from "./javascriptSemanticTraversal.js";
@@ -66,50 +67,55 @@ it.each([
     "a destructured contextBridge exposure",
     'const { contextBridge } = require("electron");\ncontextBridge.exposeInMainWorld("api", {});',
     true,
+    true,
   ],
   [
     "a direct ipcRenderer send",
     'require("electron").ipcRenderer.send("ready");',
+    true,
     true,
   ],
   [
     "a template-literal specifier",
     'require(`electron`).ipcRenderer.send("ready");',
     true,
+    true,
   ],
   [
     "a renderer IPC listener",
     'const { ipcRenderer } = require("electron");\nipcRenderer.on("update", () => {});',
     true,
+    true,
+  ],
+  [
+    "a renderer call in a never-run bundler factory default",
+    'globalThis.webpackChunkApp.push([[1], {\n  7(module = require("electron").ipcRenderer.send("unused"), exports, load) {}\n}]);',
+    true,
+    false,
   ],
   [
     "main-process IPC only",
     'const { app, ipcMain } = require("electron");\nipcMain.handle("ping", () => app.getName());',
     false,
+    false,
   ],
-  ["no Electron operation", 'require("electron");', false],
+  ["no Electron operation", 'require("electron");', false, false],
   [
     "a locally bound require",
     'function load(require) {\n  require("electron").contextBridge.exposeInMainWorld("api", {});\n}',
     false,
+    false,
   ],
 ] as const)(
-  "reads renderer-side Electron evidence from %s",
-  (_name, source, expected) => {
+  "screens and confirms renderer-side Electron evidence from %s",
+  (_name, source, screened, confirmed) => {
     const parsed = parse(source, "preload.js");
     expect(
-      completeSemanticSteps(electronRendererEvidenceSteps(parsed.program)),
-    ).toBe(expected);
-    // The focused check agrees with the full static pass's direct findings.
+      completeSemanticSteps(
+        mayHaveElectronRendererEvidenceSteps(parsed.program),
+      ),
+    ).toBe(screened);
     const { electron } = analyzeParsedJavaScriptStaticSource(source, parsed);
-    expect(
-      electron.context_bridge_apis.some(
-        ({ resolution_basis }) => resolution_basis === undefined,
-      ) ||
-        electron.ipc.some(
-          ({ side, resolution_basis }) =>
-            side === "renderer" && resolution_basis === undefined,
-        ),
-    ).toBe(expected);
+    expect(hasElectronRendererEvidence(electron)).toBe(confirmed);
   },
 );

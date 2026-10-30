@@ -365,14 +365,22 @@ cliTest(
     const source = (dependency: string) =>
       `try { console.log(require(${JSON.stringify(dependency)})); } catch (error) { console.log(error.name); }\n`;
     // The nearest package.json owns each .js file's scope (Node packages.md,
-    // "Determining module system"). Requiring Electron, directly or through a
-    // local loader, does not give a Node-loaded module a require.
+    // "Determining module system"). Requiring Electron, directly, through a
+    // local loader, or in a bundler factory default that never runs, does not
+    // give a Node-loaded module a require.
     await writeFixtureFiles(root, {
       "package.json": JSON.stringify({ type: "module" }),
       "main.js": source("./dep.cjs"),
       "electron-main.js":
         'try { require("electron"); console.log(require("./dep.cjs")); } catch (error) { console.log(error.name); }\n',
       "shadowed.js": `function load(require) { return require("electron").contextBridge; }\n${source("./dep.cjs")}`,
+      "dead-default.js": [
+        source("./dep.cjs"),
+        "globalThis.webpackChunkApp = [];",
+        "globalThis.webpackChunkApp.push([[1], {",
+        '  7(module = require("electron").ipcRenderer.send("unused"), exports, load) {}',
+        "}]);",
+      ].join("\n"),
       "dep.cjs": "module.exports = 1;\n",
       "legacy/package.json": JSON.stringify({ type: "commonjs" }),
       "legacy/main.js": source("../dep.cjs"),
@@ -383,6 +391,7 @@ cliTest(
       ["main.js", "ReferenceError"],
       ["electron-main.js", "ReferenceError"],
       ["shadowed.js", "ReferenceError"],
+      ["dead-default.js", "ReferenceError"],
       ["legacy/main.js", "1"],
       ["untyped/main.js", "1"],
     ] as const) {
@@ -402,7 +411,12 @@ cliTest(
     const { graph } = javascriptApplicationAnalysisResultSchema.parse(
       parseEvidence(response.json).normalized_result,
     );
-    for (const path of ["main.js", "electron-main.js", "shadowed.js"])
+    for (const path of [
+      "main.js",
+      "electron-main.js",
+      "shadowed.js",
+      "dead-default.js",
+    ])
       expect(sourceRequireFacts(graph, path), path).toEqual({
         module_format: "unknown",
         import_relationships: 0,
