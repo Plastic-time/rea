@@ -1,9 +1,10 @@
 import { expect, it } from "vitest";
 
 import {
-  hasElectronRendererEvidence,
+  electronRendererEvidenceSteps,
   mayRunUnderElectronScriptLoader,
 } from "./electronScriptLoaderEvidence.js";
+import { completeSemanticSteps } from "./javascriptSemanticTraversal.js";
 import { parseJavaScriptSource } from "./javascriptSourceParser.js";
 import { analyzeParsedJavaScriptStaticSource } from "./javascriptStaticAnalysis.js";
 
@@ -20,14 +21,37 @@ it.each([
     "module",
     true,
   ],
-  ['require("electron/renderer");', "preload.ts", "module", true],
-  ['void (() => require("electron"));', "preload.js", "module", true],
-  ['const dependency = require("./dep.cjs");', "main.js", "module", false],
-  ['const store = require("electron-store");', "main.js", "module", false],
-  ['import "./setup.js"; require("electron");', "main.js", "module", false],
-  ['require("electron");', "preload.mjs", "module", false],
-  ['require("electron");', "preload.js", "commonjs", false],
-  ['require("electron");', "preload.js", undefined, false],
+  ['require("electron/renderer").contextBridge;', "preload.ts", "module", true],
+  [
+    'void (() => require("electron")["ipcRenderer"]);',
+    "preload.js",
+    "module",
+    true,
+  ],
+  ["require(`electron`)[`ipcRenderer`];", "preload.js", "module", true],
+  ['require("electron");', "main.js", "module", false],
+  [
+    'const { app, BrowserWindow } = require("electron");',
+    "main.js",
+    "module",
+    false,
+  ],
+  ['const ipcRenderer = require("./dep.cjs");', "main.js", "module", false],
+  [
+    'const store = require("electron-store"); store.ipcRenderer;',
+    "main.js",
+    "module",
+    false,
+  ],
+  [
+    'import "./setup.js"; require("electron").ipcRenderer;',
+    "main.js",
+    "module",
+    false,
+  ],
+  ['require("electron").ipcRenderer;', "preload.mjs", "module", false],
+  ['require("electron").ipcRenderer;', "preload.js", "commonjs", false],
+  ['require("electron").ipcRenderer;', "preload.js", undefined, false],
 ] as const)(
   "selects package-module scripts that require Electron: %s (%s, %s)",
   (source, path, packageType, expected) => {
@@ -46,6 +70,11 @@ it.each([
   [
     "a direct ipcRenderer send",
     'require("electron").ipcRenderer.send("ready");',
+    true,
+  ],
+  [
+    "a template-literal specifier",
+    'require(`electron`).ipcRenderer.send("ready");',
     true,
   ],
   [
@@ -68,7 +97,19 @@ it.each([
   "reads renderer-side Electron evidence from %s",
   (_name, source, expected) => {
     const parsed = parse(source, "preload.js");
+    expect(
+      completeSemanticSteps(electronRendererEvidenceSteps(parsed.program)),
+    ).toBe(expected);
+    // The focused check agrees with the full static pass's direct findings.
     const { electron } = analyzeParsedJavaScriptStaticSource(source, parsed);
-    expect(hasElectronRendererEvidence(electron)).toBe(expected);
+    expect(
+      electron.context_bridge_apis.some(
+        ({ resolution_basis }) => resolution_basis === undefined,
+      ) ||
+        electron.ipc.some(
+          ({ side, resolution_basis }) =>
+            side === "renderer" && resolution_basis === undefined,
+        ),
+    ).toBe(expected);
   },
 );
