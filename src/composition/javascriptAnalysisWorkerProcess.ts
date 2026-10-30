@@ -1,11 +1,13 @@
 import {
-  hasElectronRendererEvidence,
   mayHaveElectronRendererEvidenceSteps,
   mayRunUnderElectronScriptLoader,
 } from "../domain/javascript/electronScriptLoaderEvidence.js";
 import { moduleResolutionModeForJavaScriptReference } from "../domain/javascript/javascriptModuleResolutionMode.js";
 import { parseJavaScriptSource } from "../domain/javascript/javascriptSourceParser.js";
-import { analyzeParsedJavaScriptStaticSourceSteps } from "../domain/javascript/javascriptStaticAnalysis.js";
+import {
+  analyzeParsedJavaScriptStaticSourceSteps,
+  observedElectronRendererCall,
+} from "../domain/javascript/javascriptStaticAnalysis.js";
 import type { JavaScriptStaticAnalysis } from "../domain/javascript/javascriptStaticAnalysisTypes.js";
 import { analyzeParsedJavaScriptSemanticsSteps } from "../domain/javascript/javascriptSemanticAnalysis.js";
 import { failedJavaScriptStaticAnalysis } from "../domain/javascript/javascriptStaticAnalysisHelpers.js";
@@ -53,7 +55,7 @@ const analyze: JavaScriptSourceWorkerAnalyzer = async (
       const scriptFacts = await completeJavaScriptAnalysisSteps(
         analyzeParsedJavaScriptStaticSourceSteps(file.text.value, script),
       );
-      if (hasElectronRendererEvidence(scriptFacts.electron)) {
+      if (observedElectronRendererCall(scriptFacts)) {
         parsed = script;
         facts = scriptFacts;
       }

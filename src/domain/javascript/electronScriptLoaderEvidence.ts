@@ -1,7 +1,6 @@
 import * as t from "@babel/types";
 
 import { ipcDescriptor } from "./electronStaticAnalysisIpc.js";
-import type { ElectronStaticFindings } from "./electronStaticAnalysisTypes.js";
 import { electronCalleePath } from "./electronStaticAnalysisValues.js";
 import { contextBridgeExposureArguments } from "./javascriptContextBridgeExposure.js";
 import { ELECTRON_MODULE } from "./javascriptElectronMemberWrites.js";
@@ -27,7 +26,7 @@ import { stringValue } from "./javascriptStaticAnalysisHelpers.js";
  * the source a module under every loader, so only scripts qualify. The
  * source must also name `contextBridge` or `ipcRenderer`: Electron identity
  * reaches a member only through an identifier, string, or template key, so a
- * source naming neither cannot yield {@link hasElectronRendererEvidence}.
+ * source naming neither can yield renderer evidence.
  */
 export const mayRunUnderElectronScriptLoader = (
   program: t.Program,
@@ -69,7 +68,7 @@ const rendererModules: ReadonlySet<string> = new Set([
  * exposure and IPC descriptors, but not its bundler recognition. It therefore
  * also counts factory defaults that the bundler convention never runs, which
  * only that pass excludes: a false result rules evidence out, and a true one
- * still needs {@link hasElectronRendererEvidence} on the pass's findings.
+ * still needs the pass's own `observedElectronRendererCall`.
  */
 export function* mayHaveElectronRendererEvidenceSteps(
   program: t.Program,
@@ -103,19 +102,3 @@ export function* mayHaveElectronRendererEvidenceSteps(
   });
   return found;
 }
-
-/**
- * Whether static findings directly observe a `contextBridge` exposure or a
- * renderer IPC operation, which places their source under a renderer-side
- * loader. Wrapper substitutions are inferred, so they do not count.
- */
-export const hasElectronRendererEvidence = (
-  electron: ElectronStaticFindings,
-): boolean =>
-  electron.context_bridge_apis.some(
-    ({ resolution_basis }) => resolution_basis === undefined,
-  ) ||
-  electron.ipc.some(
-    ({ side, resolution_basis }) =>
-      side === "renderer" && resolution_basis === undefined,
-  );

@@ -454,6 +454,14 @@ cliTest(
         'const { contextBridge, ipcRenderer } = require("electron");',
         'contextBridge.exposeInMainWorld("api", { ping: () => ipcRenderer.invoke("ping") });',
       ].join("\n"),
+      // Its only renderer call is a contextBridge exposure inside a helper.
+      "bridge-helper.js": [
+        'const { contextBridge } = require("electron");',
+        "function expose(key) {",
+        "  contextBridge.exposeInMainWorld(key, { version: () => 1 });",
+        "}",
+        'expose("helper");',
+      ].join("\n"),
       "index.html": "<!doctype html><title>app</title>\n",
     });
 
@@ -473,6 +481,11 @@ cliTest(
         ["electron", null, "external"],
         ["electron", null, "external"],
       ],
+    });
+    expect(sourceRequireFacts(graph, "bridge-helper.js")).toEqual({
+      module_format: "commonjs",
+      import_relationships: 1,
+      require_targets: [["electron", null, "external"]],
     });
     expect(summary.ipc).toMatchObject({
       main_handlers: 1,

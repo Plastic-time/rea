@@ -1,13 +1,15 @@
 import { expect, it } from "vitest";
 
 import {
-  hasElectronRendererEvidence,
   mayHaveElectronRendererEvidenceSteps,
   mayRunUnderElectronScriptLoader,
 } from "./electronScriptLoaderEvidence.js";
 import { completeSemanticSteps } from "./javascriptSemanticTraversal.js";
 import { parseJavaScriptSource } from "./javascriptSourceParser.js";
-import { analyzeParsedJavaScriptStaticSource } from "./javascriptStaticAnalysis.js";
+import {
+  analyzeParsedJavaScriptStaticSource,
+  observedElectronRendererCall,
+} from "./javascriptStaticAnalysis.js";
 
 const parse = (...input: Parameters<typeof parseJavaScriptSource>) => {
   const parsed = parseJavaScriptSource(...input);
@@ -88,6 +90,18 @@ it.each([
     true,
   ],
   [
+    "a contextBridge exposure inside a helper",
+    'const { contextBridge } = require("electron");\nfunction expose(key) {\n  contextBridge.exposeInMainWorld(key, { ping() {} });\n}\nexpose("api");',
+    true,
+    true,
+  ],
+  [
+    "a renderer send inside a helper",
+    'const { ipcRenderer } = require("electron");\nfunction send(channel) {\n  ipcRenderer.send(channel);\n}\nsend("ready");',
+    true,
+    true,
+  ],
+  [
     "a renderer call in a never-run bundler factory default",
     'globalThis.webpackChunkApp.push([[1], {\n  7(module = require("electron").ipcRenderer.send("unused"), exports, load) {}\n}]);',
     true,
@@ -115,7 +129,10 @@ it.each([
         mayHaveElectronRendererEvidenceSteps(parsed.program),
       ),
     ).toBe(screened);
-    const { electron } = analyzeParsedJavaScriptStaticSource(source, parsed);
-    expect(hasElectronRendererEvidence(electron)).toBe(confirmed);
+    expect(
+      observedElectronRendererCall(
+        analyzeParsedJavaScriptStaticSource(source, parsed),
+      ),
+    ).toBe(confirmed);
   },
 );
