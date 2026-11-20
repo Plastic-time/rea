@@ -15,8 +15,9 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import { join, posix, resolve } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -1476,19 +1477,44 @@ describe("CutterBridgeClient: conservative platform checks", () => {
         "CutterBridge",
       ),
     });
-    await expect(
-      new CutterBridgeClient({}, { platform: "darwin" }).listSessions(),
-    ).resolves.toMatchObject({
-      bridge_directory: join(homedir(), ".cache", "rea", "cutter-bridge"),
+  });
+
+  it("resolves the default bridge directory from the client environment", async () => {
+    const root = await createTestTempDirectory("cutter-bridge-home-");
+    const ambient = posix.join(root, "ambient");
+    const account = posix.join(root, "account");
+    const selected = posix.join(root, "selected");
+    vi.stubEnv("HOME", ambient);
+    vi.resetModules();
+    vi.doMock("node:os", async () => {
+      const os = await vi.importActual<typeof import("node:os")>("node:os");
+      return {
+        ...os,
+        userInfo: () => ({ homedir: account }),
+      };
     });
-    await expect(
-      new CutterBridgeClient(
-        { REA_CUTTER_BRIDGE_DIR: "" },
-        { platform: "darwin" },
-      ).listSessions(),
-    ).resolves.toMatchObject({
-      bridge_directory: join(homedir(), ".cache", "rea", "cutter-bridge"),
-    });
+    try {
+      const { CutterBridgeClient: HomeFixtureCutterClient } =
+        await import("../../../src/cutter/CutterBridgeClient.js");
+      const options = { platform: "darwin" } as const;
+      const accountCache = posix.join(account, ".cache/rea/cutter-bridge");
+      for (const environment of [{}, { REA_CUTTER_BRIDGE_DIR: "" }]) {
+        await expect(
+          new HomeFixtureCutterClient(environment, options).listSessions(),
+        ).resolves.toMatchObject({
+          bridge_directory: accountCache,
+        });
+      }
+      await expect(
+        new HomeFixtureCutterClient({ HOME: selected }, options).listSessions(),
+      ).resolves.toMatchObject({
+        bridge_directory: posix.join(selected, ".cache/rea/cutter-bridge"),
+      });
+    } finally {
+      vi.unstubAllEnvs();
+      vi.doUnmock("node:os");
+      vi.resetModules();
+    }
   });
 });
 
