@@ -33,7 +33,11 @@ import {
   cancelledBy,
   carriedReason,
 } from "../domain/analysisErrorCore.js";
-import { parseFailureAnalysisError } from "../domain/parseFailureAnalysisError.js";
+import {
+  parseFailureAnalysisError,
+  parseLimitConstraint,
+} from "../domain/parseFailureAnalysisError.js";
+import { fixedAllowanceOptions } from "../domain/fixedAllowanceRemediation.js";
 import {
   projectZstandardFrameAllowance,
   ZstandardFrameAllowanceError,
@@ -41,7 +45,10 @@ import {
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { err, ok, type Result } from "../domain/result.js";
 import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
-import { BinaryResourceFailure } from "../domain/binaryContainer.js";
+import {
+  BinaryResourceFailure,
+  binaryResourceCeiling,
+} from "../domain/binaryContainer.js";
 import {
   GpuFileSource,
   gpuCount,
@@ -132,22 +139,33 @@ export class GpuCodeObjectsProvider implements GpuCodeObjectsPort {
         primary instanceof AnalysisError
       )
         error = primary;
-      else if (primary instanceof BinaryResourceFailure)
-        error = new AnalysisResourceConstraintError(
-          OPERATION,
-          "memory",
-          primary.message,
-          {
-            maximum_object_bytes: GPU_OBJECT_BYTES,
-            maximum_report_bytes: GPU_REPORT_BYTES,
-          },
-          {
-            cause,
-            retryable: false,
-            remediationAction: `${primary.message} This release has no runtime override for that GPU byte allowance. The object allowance is ${String(GPU_OBJECT_BYTES)} bytes and the report allowance is ${String(GPU_REPORT_BYTES)} bytes. Additional host memory does not raise them. Repeating the unchanged request fails the same way.`,
-          },
-        );
-      else if (formatFailure !== undefined) error = formatFailure;
+      else if (primary instanceof BinaryResourceFailure) {
+        const byteAllowances = {
+          maximum_object_bytes: GPU_OBJECT_BYTES,
+          maximum_report_bytes: GPU_REPORT_BYTES,
+        };
+        error =
+          primary.unit === undefined
+            ? new AnalysisResourceConstraintError(
+                OPERATION,
+                "memory",
+                primary.message,
+                byteAllowances,
+                {
+                  cause,
+                  retryable: false,
+                  remediationAction: `${primary.message} This release has no runtime override for that GPU byte allowance. The object allowance is ${String(GPU_OBJECT_BYTES)} bytes and the report allowance is ${String(GPU_REPORT_BYTES)} bytes. Additional host memory does not raise them. Repeating the unchanged request fails the same way.`,
+                },
+              )
+            : parseLimitConstraint(OPERATION, "memory", primary, {
+                reportedLimitContext: byteAllowances,
+                ...fixedAllowanceOptions(
+                  "The GPU parser allowance",
+                  "parser",
+                  binaryResourceCeiling(primary),
+                ),
+              });
+      } else if (formatFailure !== undefined) error = formatFailure;
       else if (
         origin === "owned-or-classified" &&
         primary instanceof ArtifactReaderFailure &&

@@ -24,6 +24,8 @@ export const CLANG_BUNDLE_MAGIC = Buffer.from("__CLANG_OFFLOAD_BUNDLE__");
 export const CCOB_MAGIC = Buffer.from("CCOB");
 const CLANG_BUNDLE_HEADER_BYTES = 32;
 const CLANG_BUNDLE_ENTRY_BYTES = 24;
+const MAX_BUNDLE_ENTRIES = 65_536;
+const MAX_BUNDLE_ID_BYTES = 65_536;
 export const readClangBundleDirectory = async (
   source: GpuSource,
   base: number,
@@ -49,11 +51,13 @@ export const readClangBundleDirectory = async (
   )
     rejectGpu("Clang offload bundle directory is truncated");
   const count = gpuCount(declaredCount);
-  if (count > 65536)
+  if (count > MAX_BUNDLE_ENTRIES)
     throw new BinaryResourceFailure(
       "structure",
-      65536,
-      "HIP bundle entry count exceeds the inventory budget",
+      MAX_BUNDLE_ENTRIES,
+      `HIP bundle directory exceeds the ${String(MAX_BUNDLE_ENTRIES)}-entry inventory budget`,
+      "clang-bundle-entries",
+      "entries",
     );
   // One wrapper/identity per admitted entry (at most 65536). Processor text is
   // no longer than its admitted name; cumulative name bytes remain
@@ -96,11 +100,21 @@ export const readClangBundleDirectory = async (
     if (minimumDirectoryEnd > firstPayload)
       rejectGpu("HIP entry overlaps its bundle directory");
     const nameSize = Number(rawNameSize);
-    if (nameSize > 65536 || nameOffset - base + nameSize > GPU_REPORT_BYTES)
+    if (nameSize > MAX_BUNDLE_ID_BYTES)
+      throw new BinaryResourceFailure(
+        "structure",
+        MAX_BUNDLE_ID_BYTES,
+        `HIP bundle ID exceeds ${String(MAX_BUNDLE_ID_BYTES)} bytes`,
+        "clang-bundle-id-bytes",
+        "bytes",
+      );
+    if (nameOffset - base + nameSize > GPU_REPORT_BYTES)
       throw new BinaryResourceFailure(
         "structure",
         GPU_REPORT_BYTES,
-        "HIP directory exceeds 16 MiB or its bundle ID exceeds 65536 bytes",
+        "HIP directory exceeds 16 MiB",
+        "clang-bundle-directory-bytes",
+        "bytes",
       );
     let name: string;
     try {

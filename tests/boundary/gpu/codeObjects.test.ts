@@ -1531,7 +1531,54 @@ it("distinguishes impossible Clang bundle counts from a framed over-capacity dir
   }
   const result = await inspect(framed, { analysis: "inventory" });
   if (result.ok) throw new Error("Expected directory capacity failure");
-  expect(result.error._tag).toBe("AnalysisResourceConstraintError");
+  expect(result.error).toMatchObject({
+    _tag: "AnalysisResourceConstraintError",
+    reportedLimits: {
+      boundary: "clang-bundle-entries",
+      maximum: 65_536,
+      maximum_object_bytes: 128 * 1024 * 1024,
+      maximum_report_bytes: 16 * 1024 * 1024,
+    },
+    fixedAllowance: { limit: 65_536, unit: "entries" },
+    retryable: false,
+  });
+  const nested = await inspect(ccobFixture(2, "zstd", framed), {
+    analysis: "inventory",
+  });
+  if (!nested.ok) throw nested.error;
+  expect(nested.value.objects[0]).toMatchObject({
+    inspection: "capacity",
+    limitations: expect.arrayContaining([
+      expect.stringContaining("65536-entry"),
+    ]),
+  });
+});
+
+it("reports the aggregate Clang directory budget when each ID fits", async () => {
+  const count = 256;
+  const idBytes = 65_536;
+  const entryBytes = 24 + idBytes;
+  const framed = Buffer.alloc(32 + count * entryBytes);
+  framed.write("__CLANG_OFFLOAD_BUNDLE__");
+  framed.writeBigUInt64LE(BigInt(count), 24);
+  for (let index = 0; index < count; index++) {
+    const row = 32 + index * entryBytes;
+    framed.writeBigUInt64LE(BigInt(framed.length), row);
+    framed.writeBigUInt64LE(BigInt(idBytes), row + 16);
+    framed.fill(0x78, row + 24, row + entryBytes);
+    framed.write(`host-${index}-`, row + 24);
+  }
+  const result = await inspect(framed, { analysis: "inventory" });
+  if (result.ok) throw new Error("Expected directory capacity failure");
+  expect(result.error).toMatchObject({
+    _tag: "AnalysisResourceConstraintError",
+    reportedLimits: {
+      boundary: "clang-bundle-directory-bytes",
+      maximum: 16 * 1024 * 1024,
+    },
+    fixedAllowance: { limit: 16 * 1024 * 1024, unit: "bytes" },
+    retryable: false,
+  });
 });
 
 it("checks Clang bundle ID bounds before the retained directory allowance", async () => {
@@ -1545,7 +1592,12 @@ it("checks Clang bundle ID bounds before the retained directory allowance", asyn
   const framed = Buffer.concat([header, Buffer.from(name), Buffer.alloc(1)]);
   const limited = await inspect(framed, { analysis: "inventory" });
   if (limited.ok) throw new Error("Expected a directory capacity failure");
-  expect(limited.error._tag).toBe("AnalysisResourceConstraintError");
+  expect(limited.error).toMatchObject({
+    _tag: "AnalysisResourceConstraintError",
+    reportedLimits: { boundary: "clang-bundle-id-bytes", maximum: 65_536 },
+    fixedAllowance: { limit: 65_536, unit: "bytes" },
+    retryable: false,
+  });
 
   const short = Buffer.from(header);
   short.writeBigUInt64LE(BigInt(short.length), 32);
