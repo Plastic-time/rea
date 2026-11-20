@@ -441,6 +441,21 @@ describe.skipIf(process.platform === "win32")("desktop entry TryExec", () => {
     });
   });
 
+  it("reports malformed hidden overrides before considering TryExec fallback", async () => {
+    const { file, inspect } = await launcher();
+    await writeFile(
+      file,
+      "[Desktop Entry]\nType=Application\nHidden=true\nTryExec=missing-companion\nbroken row\n",
+    );
+    expect(await inspect()).toMatchObject({
+      ok: false,
+      error: {
+        reason: "desktop_entry_invalid",
+        detail: expect.stringContaining("line 5"),
+      },
+    });
+  });
+
   it("checks TryExec before a hidden application can mask its ID", async () => {
     const { bin, write, inspect } = await launcher();
     await write("companion", true);

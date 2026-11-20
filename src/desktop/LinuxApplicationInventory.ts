@@ -191,14 +191,7 @@ const locateDesktopEntry = async (
     if (!located.ok && located.error.reason === "executable_not_found")
       continue;
     if (!located.ok || !located.value.entry.hidden) return located;
-    const { type, malformed_line } = located.value.entry;
-    if (type !== "Application") continue;
-    // Claim deletion only after the hidden entry establishes its structure.
-    if (malformed_line !== undefined)
-      return err({
-        reason: "desktop_entry_invalid",
-        detail: `malformed desktop entry structure at line ${String(malformed_line)}`,
-      });
+    if (located.value.entry.type !== "Application") continue;
     break;
   }
   return err({ reason: "desktop_entry_not_found", searched });
@@ -245,8 +238,19 @@ const readDesktopEntry = async (
   const parsed = parseDesktopEntry(text);
   if (!parsed.ok)
     return err({ reason: "desktop_entry_invalid", detail: parsed.error });
-  const probe = parsed.value.try_exec;
-  if (parsed.value.type === "Application" && probe) {
+  const { type, hidden, malformed_line, try_exec: probe } = parsed.value;
+  // A malformed hidden override cannot establish deletion or permit fallback.
+  if (
+    id !== null &&
+    hidden &&
+    type === "Application" &&
+    malformed_line !== undefined
+  )
+    return err({
+      reason: "desktop_entry_invalid",
+      detail: `malformed desktop entry structure at line ${String(malformed_line)}`,
+    });
+  if (type === "Application" && probe) {
     const available = await hasTryExec(
       probe,
       request.environment.PATH,
