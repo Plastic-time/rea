@@ -191,8 +191,15 @@ const locateDesktopEntry = async (
     if (!located.ok && located.error.reason === "executable_not_found")
       continue;
     if (!located.ok || !located.value.entry.hidden) return located;
-    // Only a hidden Application masks this ID in the remaining data roots.
-    if (located.value.entry.type === "Application") break;
+    const { type, malformed_line } = located.value.entry;
+    if (type !== "Application") continue;
+    // Claim deletion only after the hidden entry establishes its structure.
+    if (malformed_line !== undefined)
+      return err({
+        reason: "desktop_entry_invalid",
+        detail: `malformed desktop entry structure at line ${String(malformed_line)}`,
+      });
+    break;
   }
   return err({ reason: "desktop_entry_not_found", searched });
 };
@@ -409,6 +416,7 @@ const launchCommand = async (
     type: _type,
     try_exec: _tryExec,
     hidden: _hidden,
+    malformed_line: _malformedLine,
     path: workingDirectory,
     ...fields
   } = entry;
