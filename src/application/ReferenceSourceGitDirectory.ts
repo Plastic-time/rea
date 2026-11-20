@@ -1,6 +1,17 @@
 import { lstat, realpath, stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { absoluteCallerPath } from "../filesystem/callerPath.js";
+
+/**
+ * Admit a Git metadata read path, including those isomorphic-git builds. The
+ * library probes readFile() without a path to detect promise APIs, and joins
+ * its paths with "/". Only the separator changes, so reads, cleanup resources
+ * and messages share the host spelling that REA's own joins produce.
+ */
+export const gitLibraryPath = (path: string | undefined): string => {
+  if (path === undefined) throw new TypeError("Git metadata path is required");
+  return sep === "/" ? path : path.replaceAll("/", sep);
+};
 
 /** Parsed repository locations shared by HEAD and local ignore-policy readers. */
 export interface ReferenceSourceGitDirectory {
@@ -46,7 +57,7 @@ export const locateReferenceSourceGitDirectory = async (
         cwd: repository,
       });
     }
-    // Derived joins and the Git library normalize paths lexically. Admit the
+    // Derived joins and the Git library's own paths are lexical. Admit the
     // physical directory first, while the source pointer stays in its file.
     const gitDirectory = await resolveGitDirectory(selectedGitDirectory);
     let common: string | undefined;

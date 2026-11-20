@@ -3,6 +3,7 @@ import { isAborted } from "../domain/analysisErrorCore.js";
 import fs from "node:fs";
 import { join } from "node:path";
 import {
+  gitLibraryPath,
   locateReferenceSourceGitDirectory,
   ReferenceSourceGitDirectoryCancelled,
 } from "./ReferenceSourceGitDirectory.js";
@@ -188,12 +189,10 @@ const resolveSourceVcs = async (
           | { readonly encoding?: BufferEncoding | null }
           | null = null,
       ) => {
-        // The library probes readFile() without a path to detect promise APIs.
-        // Reject that invocation without attributing it to a source read.
-        if (path === undefined)
-          throw new TypeError("Git metadata path is required");
+        // A path-less probe is rejected before it is attributed to a read.
+        const hostPath = gitLibraryPath(path);
         try {
-          const bytes = await readMetadataBytes(path);
+          const bytes = await readMetadataBytes(hostPath);
           const encoding =
             typeof options === "string"
               ? options
