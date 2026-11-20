@@ -6,7 +6,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -260,6 +260,136 @@ describe.skipIf(process.platform === "win32")(
     });
   },
 );
+
+describe.skipIf(process.platform === "win32")("desktop entry TryExec", () => {
+  const launcher = async () => {
+    const { home, bin, environment } = await fixture();
+    const applications = join(environment.XDG_DATA_HOME, "applications");
+    await mkdir(applications, { recursive: true });
+    const file = join(applications, "org.example.notes.desktop");
+    const write = (tryExec: string, hidden = false) =>
+      writeFile(
+        file,
+        [
+          "[Desktop Entry]",
+          "Type=Application",
+          "Name=User notes",
+          "Exec=/bin/true",
+          "TryExec=" + tryExec,
+          ...(hidden ? ["Hidden=true"] : []),
+        ].join("\n"),
+      );
+    const inspect = (
+      desktopEntry = "org.example.notes",
+      dataDirs = environment.XDG_DATA_DIRS,
+      overrides: { PATH?: string | undefined } = {},
+    ) =>
+      inspectLinuxApplication({
+        desktopEntry,
+        executable: undefined,
+        arguments: [],
+        home,
+        callerDirectory: home,
+        environment: { ...environment, XDG_DATA_DIRS: dataDirs, ...overrides },
+      });
+    return { bin, file, home, write, inspect };
+  };
+  const entryName = (name: string) => ({
+    ok: true,
+    value: { inventory: { desktop_entry: { name } } },
+  });
+
+  it("falls through unavailable named probes and preserves direct file refusal", async () => {
+    const { bin, file, home, write, inspect } = await launcher();
+    await writeFile(join(home, "companion"), "", { mode: 0o755 });
+    await write("companion");
+    expect(await inspect()).toMatchObject(entryName("Notes"));
+    expect(await inspect(file)).toMatchObject({
+      ok: false,
+      error: { reason: "executable_not_found", program: "companion" },
+    });
+    expect(
+      await inspect("org.example.notes", join(home, "empty-root")),
+    ).toMatchObject({
+      ok: false,
+      error: { reason: "desktop_entry_not_found" },
+    });
+    const probe = join(bin, "companion");
+    await writeFile(probe, "", { mode: 0o644 });
+    expect(await inspect()).toMatchObject(entryName("Notes"));
+    await chmod(probe, 0o755);
+    expect(await inspect()).toMatchObject(entryName("User notes"));
+    expect(await inspect(file)).toMatchObject(entryName("User notes"));
+  });
+
+  it("uses the absolute probe as written and accepts an empty TryExec", async () => {
+    const { bin, home, write, inspect } = await launcher();
+    const probe = join(home, "Program files", "notes-app");
+    const shadow = join(bin, probe);
+    await mkdir(dirname(shadow), { recursive: true });
+    await writeFile(shadow, "", { mode: 0o755 });
+    await write(probe);
+    expect(await inspect()).toMatchObject(entryName("Notes"));
+    await mkdir(dirname(probe), { recursive: true });
+    await writeFile(probe, "", { mode: 0o755 });
+    expect(await inspect()).toMatchObject(entryName("User notes"));
+    await write(bin);
+    expect(await inspect()).toMatchObject(entryName("Notes"));
+    await write("");
+    expect(await inspect()).toMatchObject(entryName("User notes"));
+  });
+
+  it("checks the caller directory and PATH for relative probe paths", async () => {
+    const { bin, home, file, write, inspect } = await launcher();
+    await write("./companion");
+    const direct = () => inspect(file, undefined, { PATH: bin });
+    expect(await direct()).toMatchObject({
+      ok: false,
+      error: { reason: "executable_not_found" },
+    });
+    await writeFile(join(bin, "companion"), "", { mode: 0o755 });
+    expect(await direct()).toMatchObject(entryName("User notes"));
+    await writeFile(join(home, "companion"), "", { mode: 0o755 });
+    expect(await inspect(file, undefined, { PATH: "/missing" })).toMatchObject(
+      entryName("User notes"),
+    );
+  });
+
+  it("distinguishes an unset PATH from an empty one", async () => {
+    const { file, write, inspect } = await launcher();
+    await write("sh");
+    expect(await inspect(file, undefined, { PATH: undefined })).toMatchObject(
+      entryName("User notes"),
+    );
+    expect(await inspect(file, undefined, { PATH: "" })).toMatchObject({
+      ok: false,
+      error: { reason: "executable_not_found", program: "sh" },
+    });
+  });
+
+  it("preserves an invalid entry error for a non-application with a missing probe", async () => {
+    const { file, inspect } = await launcher();
+    await writeFile(
+      file,
+      "[Desktop Entry]\nType=Link\nName=Website\nTryExec=missing-companion\nURL=https://example.invalid/",
+    );
+    expect(await inspect(file)).toMatchObject({
+      ok: false,
+      error: { reason: "desktop_entry_invalid" },
+    });
+  });
+
+  it("checks TryExec before a hidden application can mask its ID", async () => {
+    const { bin, write, inspect } = await launcher();
+    await write("companion", true);
+    expect(await inspect()).toMatchObject(entryName("Notes"));
+    await writeFile(join(bin, "companion"), "", { mode: 0o755 });
+    expect(await inspect()).toMatchObject({
+      ok: false,
+      error: { reason: "desktop_entry_not_found" },
+    });
+  });
+});
 
 describe.skipIf(process.platform === "win32")("inspectLinuxApplication", () => {
   it("resolves a desktop entry id into a launch command and state directories", async () => {

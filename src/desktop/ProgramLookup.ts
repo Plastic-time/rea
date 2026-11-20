@@ -52,3 +52,29 @@ export const resolveProgram = async (
     if (await isExecutable(candidate.path)) return candidate;
   return undefined;
 };
+
+/** GIO checks a relative TryExec containing a slash in the caller's directory
+ * first. If it is missing there, it can still be found under a PATH entry. */
+export const hasTryExec = async (
+  program: string,
+  searchPath: string | undefined,
+  callerDirectory: string,
+): Promise<boolean> => {
+  if (program.includes("/")) {
+    const direct = await isExecutable(
+      absoluteCallerPath(program, { cwd: callerDirectory }),
+    );
+    if (direct || program.startsWith("/")) return direct;
+  }
+  for (const candidate of posixPathCandidates(
+    program,
+    searchPath ?? "/bin:/usr/bin:.",
+    {
+      relativeEntries: "resolve",
+      workingDirectory: callerDirectory,
+    },
+  )) {
+    if (await isExecutable(candidate.path)) return true;
+  }
+  return false;
+};

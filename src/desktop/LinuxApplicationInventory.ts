@@ -39,7 +39,7 @@ import {
 } from "./DebianPackageInventory.js";
 import { hostReadFailure, isRefusedRead } from "./HostFileRead.js";
 import { runHostQuery } from "./HostQuery.js";
-import { resolveProgram } from "./ProgramLookup.js";
+import { hasTryExec, resolveProgram } from "./ProgramLookup.js";
 import type {
   LinuxApplicationFacts,
   LinuxApplicationRefusal,
@@ -160,7 +160,8 @@ const locateDesktopEntry = async (
   selector: string,
   signal?: AbortSignal,
 ): ReturnType<typeof readDesktopEntry> => {
-  if (isAbsolute(selector)) return readDesktopEntry(selector, null, signal);
+  if (isAbsolute(selector))
+    return readDesktopEntry(request, selector, null, signal);
   const id = selector.endsWith(".desktop") ? selector : `${selector}.desktop`;
   const searched = desktopEntryDirectories(request.environment, request.home);
   for (const directory of searched) {
@@ -182,10 +183,13 @@ const locateDesktopEntry = async (
       candidate = nested.path;
     }
     const located = await readDesktopEntry(
+      request,
       candidate,
       id.slice(0, -".desktop".length),
       signal,
     );
+    if (!located.ok && located.error.reason === "executable_not_found")
+      continue;
     if (!located.ok || !located.value.entry.hidden) return located;
     // Only a hidden Application masks this ID in the remaining data roots.
     if (located.value.entry.type === "Application") break;
@@ -194,6 +198,7 @@ const locateDesktopEntry = async (
 };
 
 const readDesktopEntry = async (
+  request: LinuxApplicationRequest,
   path: string,
   id: string | null,
   signal: AbortSignal | undefined,
@@ -233,6 +238,17 @@ const readDesktopEntry = async (
   const parsed = parseDesktopEntry(text);
   if (!parsed.ok)
     return err({ reason: "desktop_entry_invalid", detail: parsed.error });
+  const probe = parsed.value.try_exec;
+  if (parsed.value.type === "Application" && probe) {
+    const available = await hasTryExec(
+      probe,
+      request.environment.PATH,
+      request.callerDirectory,
+    );
+    assertArtifactReadActive(signal);
+    if (!available)
+      return err({ reason: "executable_not_found", program: probe });
+  }
   return ok({ path, id, entry: parsed.value });
 };
 
